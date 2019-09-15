@@ -42,11 +42,6 @@ public class InstallerDefault extends InstallerAbstract {
 
     @Override
     public boolean verify(App app) {
-        if (Paths.getApkAndSplits(context, app.getPackageName(), app.getVersionCode()).size() > 1) {
-            Log.e(getClass().getSimpleName(), "Split apks are not supported by default installer");
-            notifyAndToast(R.string.download_manager_SPLITS_NOT_SUPPORTED, R.string.download_manager_SPLITS_NOT_SUPPORTED, app, true);
-            return false;
-        }
         if (background) {
             Log.e(getClass().getSimpleName(), "Background installation is not supported by default installer");
             return false;
