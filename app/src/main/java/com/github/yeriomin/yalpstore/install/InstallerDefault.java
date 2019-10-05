@@ -19,8 +19,10 @@
 
 package com.github.yeriomin.yalpstore.install;
 
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageInstaller;
 import android.net.Uri;
 import android.os.Build;
 import android.support.v4.content.FileProvider;
@@ -28,11 +30,15 @@ import android.util.Log;
 
 import com.github.yeriomin.yalpstore.BuildConfig;
 import com.github.yeriomin.yalpstore.Paths;
-import com.github.yeriomin.yalpstore.R;
+import com.github.yeriomin.yalpstore.Util;
 import com.github.yeriomin.yalpstore.model.App;
 import com.github.yeriomin.yalpstore.notification.NotificationManagerWrapper;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.util.List;
 
 public class InstallerDefault extends InstallerAbstract {
 
@@ -52,8 +58,12 @@ public class InstallerDefault extends InstallerAbstract {
     @Override
     protected void install(App app) {
         new NotificationManagerWrapper(context).cancel(app.getPackageName());
-        InstallationState.setSuccess(app.getPackageName());
-        context.startActivity(getOpenApkIntent(app));
+        if (Paths.getApkAndSplits(context, app.getPackageName(), app.getVersionCode()).size() > 1) {
+            installSplitApks(app);
+        } else {
+            InstallationState.setSuccess(app.getPackageName());
+            context.startActivity(getOpenApkIntent(app));
+        }
     }
 
     private Intent getOpenApkIntent(App app) {
@@ -70,4 +80,43 @@ public class InstallerDefault extends InstallerAbstract {
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         return intent;
     }
+
+    private void installSplitApks(App app) {
+        PackageInstaller mPackageInstaller = null;
+        PackageInstaller.Session session = null;
+        PackageInstaller.SessionParams sessionParams = null;
+
+        try {
+            mPackageInstaller = context.getPackageManager().getPackageInstaller();
+            sessionParams = new PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL);
+
+            int sessionID = mPackageInstaller.createSession(sessionParams);
+            session = mPackageInstaller.openSession(sessionID);
+            Log.d("YalpStore", "sessionID: " + sessionID);
+
+            List<File> apks = Paths.getApkAndSplits(context, app.getPackageName(), app.getVersionCode());
+            InputStream inputStream;
+            OutputStream outputStream;
+            for (File apk: apks) {
+                inputStream = new FileInputStream(apk);
+                outputStream = session.openWrite(apk.getName(), 0, apk.length());
+                Util.copyStream(inputStream, outputStream);
+                session.fsync(outputStream);
+                outputStream.close();
+                Log.d("YalpStore", "streamed input " + apk.getName());
+            }
+
+            Intent callbackIntent = new Intent(context, SplitAPKInstallerService.class);
+            PendingIntent pendingIntent = PendingIntent.getService(context, 0, callbackIntent, 0);
+            Log.d("YalpStore", "committing session");
+            session.commit(pendingIntent.getIntentSender());
+        } catch (Exception e) {
+            Log.e(getClass().getSimpleName(), e.getMessage());
+        } finally {
+            if (session != null) {
+                session.close();
+            }
+        }
+    }
+
 }
